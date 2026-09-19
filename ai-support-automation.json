@@ -1,0 +1,364 @@
+{
+  "name": "پشتیبانی مشتری با AI رایگان (Gemini/Groq)",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": ["message"]
+      },
+      "id": "tg-trigger",
+      "name": "پیام تلگرام مشتری",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [220, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "key",
+              "value": "={{ $credentials.geminiApiKey || 'YOUR_GEMINI_API_KEY' }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"contents\": [{\n    \"parts\": [{\n      \"text\": \"این پیام مشتری رو فقط با یکی از این کلمات جواب بده، بدون هیچ توضیح اضافه: فنی یا مالی یا عمومی\\n\\nپیام: {{ $json.message.text }}\"\n    }]\n  }]\n}",
+        "options": {}
+      },
+      "id": "http-classify",
+      "name": "دسته‌بندی پیام (Gemini)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 300],
+      "notes": "جایگزین: Groq API با هدر Authorization: Bearer YOUR_GROQ_KEY روی https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "assign-category",
+              "name": "category",
+              "type": "string",
+              "value": "={{ $json.candidates[0].content.parts[0].text.trim().toLowerCase() }}"
+            },
+            {
+              "id": "assign-chatid",
+              "name": "chatId",
+              "type": "string",
+              "value": "={{ $('پیام تلگرام مشتری').item.json.message.chat.id }}"
+            },
+            {
+              "id": "assign-text",
+              "name": "userMessage",
+              "type": "string",
+              "value": "={{ $('پیام تلگرام مشتری').item.json.message.text }}"
+            }
+          ]
+        }
+      },
+      "id": "set-category",
+      "name": "استخراج دسته",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [660, 300]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "id": "cond-simple",
+                    "leftValue": "={{ $json.category }}",
+                    "rightValue": "پیچیده",
+                    "operator": {
+                      "type": "string",
+                      "operation": "notContains"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "ساده"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "id": "cond-complex",
+                    "leftValue": "={{ $json.category }}",
+                    "rightValue": "مالی",
+                    "operator": {
+                      "type": "string",
+                      "operation": "contains"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "پیچیده"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "ساده"
+        }
+      },
+      "id": "switch-route",
+      "name": "مسیردهی بر اساس دسته",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [880, 300]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "FAQ"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "category",
+              "lookupValue": "={{ $json.category }}"
+            }
+          ]
+        }
+      },
+      "id": "sheets-faq",
+      "name": "جستجوی FAQ",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1120, 200]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('استخراج دسته').item.json.chatId }}",
+        "text": "={{ $json.answer || 'ممنون از پیامت، همکارانم به‌زودی پاسخ می‌دن.' }}",
+        "additionalFields": {}
+      },
+      "id": "tg-reply-simple",
+      "name": "پاسخ خودکار",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1340, 200]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Tickets"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "chatId": "={{ $json.chatId }}",
+            "message": "={{ $json.userMessage }}",
+            "category": "={{ $json.category }}",
+            "status": "open",
+            "date": "={{ $now.toISO() }}"
+          }
+        }
+      },
+      "id": "sheets-ticket",
+      "name": "ثبت تیکت",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1120, 400]
+    },
+    {
+      "parameters": {
+        "chatId": "=YOUR_SUPPORT_TEAM_GROUP_ID",
+        "text": "=🔴 تیکت پیچیده جدید\nدسته: {{ $json.category }}\nپیام: {{ $json.userMessage }}\nChatId مشتری: {{ $json.chatId }}",
+        "additionalFields": {}
+      },
+      "id": "tg-notify-team",
+      "name": "اطلاع به تیم پشتیبانی",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1340, 400]
+    },
+    {
+      "parameters": {
+        "numberInputs": 2
+      },
+      "id": "merge-1",
+      "name": "ادغام مسیرها",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [1560, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Log"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "date": "={{ $now.toISO() }}",
+            "category": "={{ $json.category }}"
+          }
+        }
+      },
+      "id": "sheets-log",
+      "name": "لاگ تعامل",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1780, 300]
+    }
+  ],
+  "connections": {
+    "پیام تلگرام مشتری": {
+      "main": [
+        [
+          {
+            "node": "دسته‌بندی پیام (Gemini)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "دسته‌بندی پیام (Gemini)": {
+      "main": [
+        [
+          {
+            "node": "استخراج دسته",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "استخراج دسته": {
+      "main": [
+        [
+          {
+            "node": "مسیردهی بر اساس دسته",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "مسیردهی بر اساس دسته": {
+      "main": [
+        [
+          {
+            "node": "جستجوی FAQ",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "ثبت تیکت",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "جستجوی FAQ": {
+      "main": [
+        [
+          {
+            "node": "پاسخ خودکار",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ثبت تیکت": {
+      "main": [
+        [
+          {
+            "node": "اطلاع به تیم پشتیبانی",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "پاسخ خودکار": {
+      "main": [
+        [
+          {
+            "node": "ادغام مسیرها",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "اطلاع به تیم پشتیبانی": {
+      "main": [
+        [
+          {
+            "node": "ادغام مسیرها",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "ادغام مسیرها": {
+      "main": [
+        [
+          {
+            "node": "لاگ تعامل",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}
