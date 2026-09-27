@@ -1,0 +1,95 @@
+{
+  "name": "Crypto Market Watchdog (Free CoinGecko API)",
+  "nodes": [
+    {
+      "parameters": { "rule": { "interval": [ { "field": "minutes", "minutesInterval": 15 } ] } },
+      "id": "trg1",
+      "name": "Every 15 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.coingecko.com/api/v3/simple/price",
+        "sendQuery": true,
+        "queryParameters": { "parameters": [ { "name": "ids", "value": "bitcoin,ethereum,solana" }, { "name": "vs_currencies", "value": "usd" } ] }
+      },
+      "id": "http1",
+      "name": "Get Current Prices",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "sheetName": "Last Prices",
+        "range": "A:D"
+      },
+      "id": "sheet1",
+      "name": "Read Last Known Prices",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [440, 460]
+    },
+    {
+      "parameters": {
+        "jsCode": "const current = items[0].json;\nconst lastRows = $('Read Last Known Prices').all().map(i => i.json);\nconst lastMap = {};\nfor (const r of lastRows) lastMap[r.coin] = parseFloat(r.price);\n\nconst coins = ['bitcoin','ethereum','solana'];\nconst threshold = 3; // percent\nconst alerts = [];\nconst updates = [];\n\nfor (const c of coins) {\n  const price = current[c].usd;\n  const last = lastMap[c];\n  let change = null;\n  if (last) change = ((price - last) / last) * 100;\n  if (change !== null && Math.abs(change) >= threshold) {\n    alerts.push(`${change > 0 ? '🚀' : '🔻'} ${c.toUpperCase()}: $${price} (${change.toFixed(2)}%)`);\n  }\n  updates.push({ coin: c, price, date: new Date().toISOString() });\n}\n\nreturn [{ json: { alertText: alerts.join('\\n'), hasAlert: alerts.length > 0, updates } }];"
+      },
+      "id": "code1",
+      "name": "Compare & Detect Alerts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 380]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [ { "leftValue": "={{$json.hasAlert}}", "rightValue": true, "operator": { "type": "boolean", "operation": "equals" } } ],
+          "combinator": "and"
+        }
+      },
+      "id": "if1",
+      "name": "Significant Change?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [900, 380]
+    },
+    {
+      "parameters": { "chatId": "={{$env.TELEGRAM_CHAT_ID}}", "text": "⚠️ هشدار قیمت ارز دیجیتال:\n\n={{$json.alertText}}" },
+      "id": "tg1",
+      "name": "Send Telegram Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1120, 280]
+    },
+    {
+      "parameters": {},
+      "id": "noop1",
+      "name": "No Significant Change",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1120, 480]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "sheetName": "Last Prices",
+        "columns": { "mappingMode": "autoMapInputData", "matchingColumns": ["coin"] }
+      },
+      "id": "sheet2",
+      "name": "Update Price Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1120, 380]
+    }
+  ],
+  "connections": {
+    "Every 15 Minutes": { "main": [[ { "node": "Get Current Prices", "type": "main", "index": 0 }, { "node": "Read Last Known Prices", "type": "main", "index": 0 } ]] },
+    "Get Current Prices": { "main": [[ { "node": "Compare & Detect Alerts", "type": "main", "index": 0 } ]] },
+    "Compare & Detect Alerts": { "main": [[ { "node": "Significant Change?", "type": "main", "index": 0 }, { "node": "Update Price Log", "type": "main", "index": 0 } ]] },
+    "Significant Change?": { "main": [ [ { "node": "Send Telegram Alert", "type": "main", "index": 0 } ], [ { "node": "No Significant Change", "type": "main", "index": 0 } ] ] }
+  }
+}

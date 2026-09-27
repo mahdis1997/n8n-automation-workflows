@@ -1,0 +1,85 @@
+{
+  "name": "GitHub Trending Tech Radar (Free API, No Key)",
+  "nodes": [
+    {
+      "parameters": { "rule": { "interval": [ { "field": "weeks", "triggerAtDay": [1], "triggerAtHour": 9 } ] } },
+      "id": "trg1",
+      "name": "Every Monday 9AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = new Date();\nd.setDate(d.getDate() - 7);\nreturn [{ json: { since: d.toISOString().split('T')[0] } }];"
+      },
+      "id": "code0",
+      "name": "Compute Date Range",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [420, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.github.com/search/repositories",
+        "sendQuery": true,
+        "queryParameters": { "parameters": [ { "name": "q", "value": "=created:>{{$json.since}} language:python" }, { "name": "sort", "value": "stars" }, { "name": "order", "value": "desc" }, { "name": "per_page", "value": "15" } ] },
+        "options": { "headers": { "User-Agent": "n8n-tech-radar" } }
+      },
+      "id": "http1",
+      "name": "Search Trending Repos",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [640, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const repos = items[0].json.items || [];\nlet report = '🛰️ رادار هفتگی تکنولوژی - محبوب‌ترین ریپوهای جدید\\n\\n';\nconst rows = [];\nrepos.slice(0, 10).forEach((r, i) => {\n  report += `${i+1}. ${r.full_name} ⭐${r.stargazers_count}\\n${r.description || 'بدون توضیح'}\\n${r.html_url}\\n\\n`;\n  rows.push({ name: r.full_name, stars: r.stargazers_count, url: r.html_url, date: new Date().toISOString() });\n});\nreturn [{ json: { report, rows } }];"
+      },
+      "id": "code1",
+      "name": "Format Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [860, 300]
+    },
+    {
+      "parameters": { "chatId": "={{$env.TELEGRAM_CHAT_ID}}", "text": "={{$json.report}}" },
+      "id": "tg1",
+      "name": "Send via Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1080, 180]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.DISCORD_WEBHOOK_URL}}",
+        "sendBody": true,
+        "bodyParameters": { "parameters": [ { "name": "content", "value": "={{$json.report}}" } ] }
+      },
+      "id": "http2",
+      "name": "Post to Discord (Free Webhook)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1080, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "sheetName": "Repo Archive",
+        "columns": { "mappingMode": "autoMapInputData" }
+      },
+      "id": "sheet1",
+      "name": "Archive in Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1080, 420]
+    }
+  ],
+  "connections": {
+    "Every Monday 9AM": { "main": [[ { "node": "Compute Date Range", "type": "main", "index": 0 } ]] },
+    "Compute Date Range": { "main": [[ { "node": "Search Trending Repos", "type": "main", "index": 0 } ]] },
+    "Search Trending Repos": { "main": [[ { "node": "Format Report", "type": "main", "index": 0 } ]] },
+    "Format Report": { "main": [[ { "node": "Send via Telegram", "type": "main", "index": 0 }, { "node": "Post to Discord (Free Webhook)", "type": "main", "index": 0 }, { "node": "Archive in Google Sheets", "type": "main", "index": 0 } ]] }
+  }
+}
